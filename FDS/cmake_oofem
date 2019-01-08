@@ -1,0 +1,5 @@
+mkdir -p default
+cd default
+pwd
+cmake -DCMAKE_CXX_FLAGS="-g -Wall -DDEBUG" -DUSE_IML="ON" =DUSE_DSS="ON" -DUSE_PYTHON_BINDINGS="ON" -DPYTHON_EXECUTABLE:FILEPATH=/usr/bin/python3 ..
+make -j 8

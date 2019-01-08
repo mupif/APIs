@@ -162,7 +162,7 @@ class TempField:
                     self.TField.addCell(6 * i + 5, liboofem.Element_Geometry_Type.EGT_tetra_1, verts)
         else:
             self.setType(1)
-            # Zjistim minmax a deleni numericky. Prasarna, ale univerzalni.
+            # get min and max and the division numerically
             locerrtol = 0.01
             self.domainSize = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
             self.meshSize = [0, 0, 0]
@@ -196,11 +196,11 @@ class fds_runall:
 
 
 # ##########################################################################################################
-# ####     ##     #####     ######   ##   ##   #############################################################
-# ####  #####  ##  ###   #########   ##   ##   #############################################################
-# ####     ##  ###  ###    #######  ###  ###  ##############################################################
+# ####     ##     #####     ################################################################################
+# ####  #####  ##  ###   ###################################################################################
+# ####     ##  ###  ###    #################################################################################
 # ####  #####  ##  ######   ################################################################################
-# ####  #####     ####     ######  ###  ###  ###############################################################
+# ####  #####     ####     #################################################################################
 # ##########################################################################################################
 class fds_api(Application.Application):
     def __init__(self, filename=""):
@@ -208,14 +208,24 @@ class fds_api(Application.Application):
         self.nMeshes = 0
         self.libfds = None
         if filename != "":
-            self.libfds = CDLL("/home/stanislav/shared/libfds_v2.so")  #
-            print("FDS reading input file '%s'" % (filename))
-            self.libfds.initialize.argtypes = [c_char_p]
-            # c_filename=c_char_p(b filename)
-            c_filename = bytes(filename, encoding='utf-8')
-            self.libfds.initialize(c_filename)
-            self.nMeshes = self.libfds.give_nmeshes()
-            print('Mesh count: ', self.nMeshes)
+            lib_full_path = "undefined"
+            lib_filename = "fds.so"
+            path_array = os.environ['PATH'].split(':')
+            for path in path_array:
+                test_path = os.path.join(path,lib_filename)
+                if os.path.isfile(test_path):
+                    lib_full_path = test_path
+            if lib_full_path:
+                print("Importing FDS shared library from %s" % lib_full_path)
+                self.libfds = cdll.LoadLibrary(lib_full_path)
+                print("FDS reading input file '%s'" % filename)
+                self.libfds.initialize.argtypes = [c_char_p]
+                # c_filename=c_char_p(b filename)
+                c_filename = bytes(filename, encoding='utf-8')
+                self.libfds.initialize(c_filename)
+                self.nMeshes = self.libfds.give_nmeshes()
+                print('Mesh count: ', self.nMeshes)
+
         # ID of the mesh, used for the boundary condition.
         self.meshBCID = 1
         self.FDSTempFields = []
@@ -509,7 +519,7 @@ class fds_api(Application.Application):
                 newmesh = Mesh.UnstructuredMesh()
                 text_file = open(filenameM, "r")
                 textLine = text_file.readline()
-                while (len(textLine) > 1):
+                while len(textLine) > 1:
                     splitted = textLine.split()
                     if len(splitted) == 3:
                         nodeid = nodeid + 1
@@ -552,11 +562,11 @@ class fds_api(Application.Application):
 
 
 # ##########################################################################################################
-# #####    ####    ###     ##     ##  ####  #######   ##   ##   ############################################
-# ####  ##  ##  ##  ##  #####  #####   ##   #######   ##   ##   ############################################
-# ####  ##  ##  ##  ##     ##    ###        #######  ###  ###  #############################################
+# #####    ####    ###     ##     ##  ####  ################################################################
+# ####  ##  ##  ##  ##  #####  #####   ##   ################################################################
+# ####  ##  ##  ##  ##     ##    ###        ################################################################
 # ####  ##  ##  ##  ##  #####  #####  #  #  ################################################################
-# #####    ####    ###  #####     ##  ####  ######  ###  ###  ##############################################
+# #####    ####    ###  #####     ##  ####  ################################################################
 # ##########################################################################################################
 class oofem_api(Application.Application):
     def __init__(self, inputfilename):
@@ -570,7 +580,7 @@ class oofem_api(Application.Application):
 
         self.ASTField = TempField()
 
-        print("OOFEM reading input file '%s'" % (inputfilename))
+        print("OOFEM reading input file '%s'" % inputfilename)
         super(oofem_api, self).__init__(inputfilename, "./")
         self.dt = 0.0
         self.lastT = 0.0
@@ -579,7 +589,7 @@ class oofem_api(Application.Application):
         self.transpModel = liboofem.InstanciateProblem(dr, liboofem.problemMode._processor, 0)
         self.transpModel.checkProblemConsistency()
         print(self.transpModel.giveClassName())
-        activeMStep = self.transpModel.giveMetaStep(1);
+        activeMStep = self.transpModel.giveMetaStep(1)
         self.transpModel.initMetaStepAttributes(activeMStep)
         self.fieldMan = self.transpModel.giveContext().giveFieldManager()
 
