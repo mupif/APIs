@@ -1,0 +1,9 @@
+This project consist of:
+
+    MuPIF API for FDS (Fire Dynamics Simulator) version 6.5.2
+
+    modified code of FDS - modifications due to the API implementation (folder "fds_code")
+
+    MuPIF API for OOFEM
+
+    steering code of CFD-Thermal(-Mechanical) simulation using FDS and OOFEM

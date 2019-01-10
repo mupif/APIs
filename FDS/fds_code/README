@@ -1,4 +1,4 @@
-This folder contains modified version of FDS.
+This folder contains modified version of FDS version 6.5.2.
 The modifications are:
     Added functions returning necessary values for Python API.
     Code of the main time loop was packed into a function for calling single computational step.

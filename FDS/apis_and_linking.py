@@ -1,8 +1,6 @@
 from __future__ import print_function, division
-from mupif import *
-import numpy as np
+import mupif
 from ctypes import *
-# from numpy.ctypeslib import ndpointer
 import os
 
 oofemImported = False
@@ -78,18 +76,18 @@ class TempField:
                 self.nnodes = numNodes
                 self.ncells = 0
 
-    def setValues(self, valField):
+    def setValues(self, val_field):
         if self.uniform == 1:
-            oField = liboofem.FloatArray(len(valField))
-            for i in range(0, len(valField)):
-                oField[i] = float(valField[i])
-            self.TField.setValues(oField)  # it is a different "setValues"...is is an oofem function
+            o_field = liboofem.FloatArray(len(val_field))
+            for i in range(0, len(val_field)):
+                o_field[i] = float(val_field[i])
+            self.TField.setValues(o_field)  # it is a different "setValues"...it is an oofem function
         else:
             if self.uniform == 0 or self.uniform == -1:
                 for i in range(0, self.nnodes):
-                    varVal = liboofem.FloatArray(1)
-                    varVal[0] = float(valField[i])
-                    self.TField.setVertexValue(i, varVal)
+                    var_val = liboofem.FloatArray(1)
+                    var_val[0] = float(val_field[i])
+                    self.TField.setVertexValue(i, var_val)
 
     def createFromASTField(self, someField):
         TotMeshNNodes = len(someField.mesh.vertexList)
@@ -191,8 +189,19 @@ class TempField:
 
 class fds_runall:
     def __init__(self):
-        self.libfds = CDLL("/home/stanislav/shared/libfds_v2.so")
-        self.libfds.run_all()
+        lib_full_path = "undefined"
+        lib_filename = "fds.so"
+        path_array = os.environ['PATH'].split(':')
+        for path in path_array:
+            test_path = os.path.join(path, lib_filename)
+            if os.path.isfile(test_path):
+                lib_full_path = test_path
+        if lib_full_path:
+            print("Importing FDS shared library from %s" % lib_full_path)
+            self.libfds = cdll.LoadLibrary(lib_full_path)
+            self.libfds.run_all()
+        else:
+            print("FDS shared library was not found.")
 
 
 # ##########################################################################################################
@@ -202,29 +211,11 @@ class fds_runall:
 # ####  #####  ##  ######   ################################################################################
 # ####  #####     ####     #################################################################################
 # ##########################################################################################################
-class fds_api(Application.Application):
+class fds_api(mupif.Application.Application):
     def __init__(self, filename=""):
-        Application.Application.__init__(self)
+        mupif.Application.Application.__init__(self, filename)
         self.nMeshes = 0
         self.libfds = None
-        if filename != "":
-            lib_full_path = "undefined"
-            lib_filename = "fds.so"
-            path_array = os.environ['PATH'].split(':')
-            for path in path_array:
-                test_path = os.path.join(path,lib_filename)
-                if os.path.isfile(test_path):
-                    lib_full_path = test_path
-            if lib_full_path:
-                print("Importing FDS shared library from %s" % lib_full_path)
-                self.libfds = cdll.LoadLibrary(lib_full_path)
-                print("FDS reading input file '%s'" % filename)
-                self.libfds.initialize.argtypes = [c_char_p]
-                # c_filename=c_char_p(b filename)
-                c_filename = bytes(filename, encoding='utf-8')
-                self.libfds.initialize(c_filename)
-                self.nMeshes = self.libfds.give_nmeshes()
-                print('Mesh count: ', self.nMeshes)
 
         # ID of the mesh, used for the boundary condition.
         self.meshBCID = 1
@@ -239,13 +230,35 @@ class fds_api(Application.Application):
         self.fds_time = c_double(0)
         self.step = 0
         self.errorCheck = 0
-        self.errorCheckErrTol = 0.00001
+        self.errorCheckErrTol = 0.01
         self.errorCheckMeshes = []
         self.errorCheckSteps = []
         self.errorCheckNodes = []
         self.errorCheckValues = []
         self.Meshes = []
         self.ASTMesh = None
+
+    def initialize(self):
+        if self.file != "":
+            lib_full_path = "undefined"
+            lib_filename = "fds.so"
+            path_array = os.environ['PATH'].split(':')
+            for path in path_array:
+                test_path = os.path.join(path, lib_filename)
+                if os.path.isfile(test_path):
+                    lib_full_path = test_path
+            if lib_full_path:
+                print("Importing FDS shared library from %s" % lib_full_path)
+                self.libfds = cdll.LoadLibrary(lib_full_path)
+                print("FDS reading input file '%s'" % self.file)
+                self.libfds.initialize.argtypes = [c_char_p]
+                # c_filename=c_char_p(b filename)
+                c_filename = bytes(self.file, encoding='utf-8')
+                self.libfds.initialize(c_filename)
+                self.nMeshes = self.libfds.give_nmeshes()
+                print('Mesh count: ', self.nMeshes)
+            else:
+                print("FDS shared library was not found.")
 
     def errorCheckLoad(self, filename="FDSErrorCheck.txt"):
         if os.path.exists(filename):
@@ -326,7 +339,7 @@ class fds_api(Application.Application):
         meshCorners = []
         self.meshNNodes = [[0 for x in range(3)] for y in range(self.nMeshes)]  # checkit
         for i in range(0, self.nMeshes):
-            newmesh = Mesh.UnstructuredMesh()
+            newmesh = mupif.Mesh.UnstructuredMesh()
             self.getMeshGridProperties(i + 1, dimensions, nnodes)
             meshCorners.append(BrickShape(dimensions))
             self.meshNNodes[i][0] = nnodes[0]
@@ -340,7 +353,7 @@ class fds_api(Application.Application):
                     for ind[2] in range(0, nnodes[2]):
                         for c in range(0, 3):
                             coords[c] = dimensions[c] + ind[c] * (dimensions[c + 3] - dimensions[c]) / (nnodes[c] - 1)
-                        newmesh.vertexList.append(Vertex.Vertex(nodeid, nodeid, [coords[0], coords[1], coords[2]]))
+                        newmesh.vertexList.append(mupif.Vertex.Vertex(nodeid, nodeid, (coords[0], coords[1], coords[2])))
                         nodeid = nodeid + 1
             cellid = 0
             ind = [0, 0, 0]
@@ -357,7 +370,7 @@ class fds_api(Application.Application):
                         n[5] = 1 + yzNodes * ind[0] + nnodes[2] * ind[1] + ind[2] + nnodes[2]
                         n[6] = 1 + yzNodes * ind[0] + nnodes[2] * ind[1] + ind[2] + nnodes[2] + yzNodes
                         n[7] = 0 + yzNodes * ind[0] + nnodes[2] * ind[1] + ind[2] + nnodes[2] + yzNodes
-                        newmesh.cellList.append(Cell.Brick_3d_lin(newmesh, cellid, cellid, n))
+                        newmesh.cellList.append(mupif.Cell.Brick_3d_lin(newmesh, cellid, cellid, n))
                         cellid = cellid + 1
             meshCellCounts.append(cellid)
             if i > 0:
@@ -369,7 +382,7 @@ class fds_api(Application.Application):
                 velikost = velikost * (dimensions[c + 3] - dimensions[c]) / (nnodes[c] - 1)
             oneCellSizes.append(velikost)
             self.Meshes.append(newmesh)
-            newTempfield = Field.Field(newmesh, FieldID.FID_Temperature, ValueType.ValueType.Scalar, 'C', 0.0)
+            newTempfield = mupif.Field.Field(newmesh, mupif.FieldID.FID_Temperature, mupif.ValueType.ValueType.Scalar, 'C', 0.0)
             self.FDSTempFields.append(newTempfield)
 
         if boundaryTempField != None:
@@ -414,7 +427,7 @@ class fds_api(Application.Application):
         if os.path.exists(filename):
             nodeid = 0
             print("loading AST mesh points...")
-            newmesh = Mesh.UnstructuredMesh()
+            newmesh = mupif.Mesh.UnstructuredMesh()
             text_file = open(filename, "r")
             textLine = text_file.readline()
             while len(textLine) > 1:
@@ -422,12 +435,12 @@ class fds_api(Application.Application):
                 if len(splitted) == 3:
                     nodeid = nodeid + 1
                     newmesh.vertexList.append(
-                        Vertex.Vertex(nodeid, nodeid, [float(splitted[0]), float(splitted[1]), float(splitted[2])]))
+                        mupif.Vertex.Vertex(nodeid, nodeid, (float(splitted[0]), float(splitted[1]), float(splitted[2]))))
                 textLine = text_file.readline()
             text_file.close()
             self.ASTMesh = newmesh
             print("%d ASTPoints" % nodeid)
-            self.FDSASTField = Field.Field(self.ASTMesh, FieldID.FID_Temperature, ValueType.ValueType.Scalar, 'C', 0.0)
+            self.FDSASTField = mupif.Field.Field(self.ASTMesh, mupif.FieldID.FID_Temperature, mupif.ValueType.ValueType.Scalar, 'C', 0.0)
 
             if boundaryTempField != None:
                 boundaryTempField.createFromASTField(self.FDSASTField)
@@ -478,7 +491,7 @@ class fds_api(Application.Application):
                 text_file.close()
 
     def loadTempField(self, filename):
-        loadedField = Field.Field.loadFromLocalFile(filename)
+        loadedField = mupif.Field.Field.loadFromLocalFile(filename)
         if self.meshBCID > len(self.FDSTempFields) - 1:
             for i in range(0, self.meshBCID - len(self.FDSTempFields) - 1):
                 self.FDSTempFields.append(None)
@@ -516,7 +529,7 @@ class fds_api(Application.Application):
             if os.path.exists(filenameM):
                 nodeid = 0
                 print("loading AST mesh points...")
-                newmesh = Mesh.UnstructuredMesh()
+                newmesh = mupif.Mesh.UnstructuredMesh()
                 text_file = open(filenameM, "r")
                 textLine = text_file.readline()
                 while len(textLine) > 1:
@@ -524,7 +537,7 @@ class fds_api(Application.Application):
                     if len(splitted) == 3:
                         nodeid = nodeid + 1
                         newmesh.vertexList.append(
-                            Vertex.Vertex(nodeid, nodeid, [float(splitted[0]), float(splitted[1]), float(splitted[2])]))
+                            mupif.Vertex.Vertex(nodeid, nodeid, (float(splitted[0]), float(splitted[1]), float(splitted[2]))))
                     textLine = text_file.readline()
                 text_file.close()
                 self.ASTMesh = newmesh
@@ -541,7 +554,7 @@ class fds_api(Application.Application):
         for i in range(0, numberOfNodes):
             tempValues.append(float(text_file.readline()))
 
-        self.FDSASTField = Field.Field(self.ASTMesh, FieldID.FID_Temperature, ValueType.ValueType.Scalar, 'C', stepTime,
+        self.FDSASTField = mupif.Field.Field(self.ASTMesh, mupif.FieldID.FID_Temperature, mupif.ValueType.ValueType.Scalar, 'C', stepTime,
                                        tempValues)
         return self.FDSASTField
 
@@ -568,57 +581,61 @@ class fds_api(Application.Application):
 # ####  ##  ##  ##  ##  #####  #####  #  #  ################################################################
 # #####    ####    ###  #####     ##  ####  ################################################################
 # ##########################################################################################################
-class oofem_api(Application.Application):
+class oofem_api(mupif.Application.Application):
     def __init__(self, inputfilename):
-        Application.Application.__init__(self)
+        mupif.Application.Application.__init__(self, inputfilename)
         global oofemImported
         global liboofem
         if not oofemImported:
             oofemImported = True
             import liboofem as liboofem
-        self.TFBC = TempField()
 
+        self.TFBC = TempField()
         self.ASTField = TempField()
 
-        print("OOFEM reading input file '%s'" % inputfilename)
-        super(oofem_api, self).__init__(inputfilename, "./")
         self.dt = 0.0
         self.lastT = 0.0
-        self.filename_oofem = inputfilename
-        dr = liboofem.OOFEMTXTDataReader(self.filename_oofem)
-        self.transpModel = liboofem.InstanciateProblem(dr, liboofem.problemMode._processor, 0)
-        self.transpModel.checkProblemConsistency()
-        print(self.transpModel.giveClassName())
-        activeMStep = self.transpModel.giveMetaStep(1)
-        self.transpModel.initMetaStepAttributes(activeMStep)
-        self.fieldMan = self.transpModel.giveContext().giveFieldManager()
+        self.transp_model = None
+        self.field_man = None
 
-    def solveStep(self, acttime):
-        self.lastT = acttime
-        self.transpModel.preInitializeNextStep()
-        self.transpModel.giveNextStep()
-        previousTargetTime = self.transpModel.givePreviousStep().giveTargetTime()
-        currentStep = self.transpModel.giveCurrentStep()
-        deltaToofem = acttime - previousTargetTime
-        alpha = (currentStep.giveIntrinsicTime() - previousTargetTime) / (
-                    currentStep.giveTargetTime() - previousTargetTime)
-        currentStep.setTargetTime(previousTargetTime + deltaToofem)
-        currentStep.setTimeIncrement(deltaToofem)
-        currentStep.setIntrinsicTime(previousTargetTime + alpha * deltaToofem)
-        self.transpModel.initializeYourself(currentStep)
-        print("OOFEM TimeStep", currentStep.giveNumber(), "target time", currentStep.giveTargetTime(), "alpha", alpha)
-        self.transpModel.solveYourselfAt(currentStep)
-        self.transpModel.updateYourself(currentStep)
-        self.transpModel.terminate(currentStep)
+    def initialize(self):
+        if self.file != "":
+            print("OOFEM reading input file '%s'" % self.file)
+            dr = liboofem.OOFEMTXTDataReader(self.file)
+            self.transp_model = liboofem.InstanciateProblem(dr, liboofem.problemMode._processor, 0)
+            self.transp_model.checkProblemConsistency()
+            print(self.transp_model.giveClassName())
+            active_m_step = self.transp_model.giveMetaStep(1)
+            self.transp_model.initMetaStepAttributes(active_m_step)
+            self.field_man = self.transp_model.giveContext().giveFieldManager()
+
+    def solveStep(self, tstep, stageID=0, runInBackground=False):
+        # tstep is now a float -> TODO
+        self.lastT = tstep
+        self.transp_model.preInitializeNextStep()
+        self.transp_model.giveNextStep()
+        previous_target_time = self.transp_model.givePreviousStep().giveTargetTime()
+        current_step = self.transp_model.giveCurrentStep()
+        deltaToofem = tstep - previous_target_time
+        alpha = (current_step.giveIntrinsicTime() - previous_target_time) / (
+                current_step.giveTargetTime() - previous_target_time)
+        current_step.setTargetTime(previous_target_time + deltaToofem)
+        current_step.setTimeIncrement(deltaToofem)
+        current_step.setIntrinsicTime(previous_target_time + alpha * deltaToofem)
+        self.transp_model.initializeYourself(current_step)
+        print("OOFEM TimeStep", current_step.giveNumber(), "target time", current_step.giveTargetTime(), "alpha", alpha)
+        self.transp_model.solveYourselfAt(current_step)
+        self.transp_model.updateYourself(current_step)
+        self.transp_model.terminate(current_step)
 
     def complete(self):
-        timeStep = self.transpModel.giveCurrentStep()
+        timeStep = self.transp_model.giveCurrentStep()
 
     def regTempField(self):
-        self.fieldMan.registerField(self.TFBC.TField, liboofem.FieldType.FT_TemperatureAmbient)
+        self.field_man.registerField(self.TFBC.TField, liboofem.FieldType.FT_TemperatureAmbient)
 
     def regASTField(self):
-        self.fieldMan.registerField(self.ASTField.TField, liboofem.FieldType.FT_TemperatureAmbient)
+        self.field_man.registerField(self.ASTField.TField, liboofem.FieldType.FT_TemperatureAmbient)
 
     def setTempField(self, temp_field_set):
         self.TFBC.setValues(temp_field_set)
@@ -631,8 +648,8 @@ class oofem_api(Application.Application):
         self.TFBC.TField.setGeometry(lo, hi, div)
         self.TFBC.nnodes = (div[0] + 1) * (div[1] + 1) * (div[2] + 1)
         self.TFBC.ncells = (div[0]) * (div[1]) * (div[2])
-        oField = liboofem.FloatArray(self.TFBC.nnodes)
+        o_field = liboofem.FloatArray(self.TFBC.nnodes)
         for i in range(0, self.TFBC.nnodes):
-            oField[i] = float(temp)
-        self.TFBC.TField.setValues(oField)
-        self.fieldMan.registerField(self.TFBC.TField, liboofem.FieldType.FT_TemperatureAmbient)
+            o_field[i] = float(temp)
+        self.TFBC.TField.setValues(o_field)
+        self.field_man.registerField(self.TFBC.TField, liboofem.FieldType.FT_TemperatureAmbient)
