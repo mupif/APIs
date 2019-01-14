@@ -3,15 +3,8 @@ import mupif
 from ctypes import *
 import os
 
-oofemImported = False
-liboofem = None
+import liboofem
 
-c_double_p = POINTER(c_double)
-c_int_p = POINTER(c_int)
-errtol = 0.00001
-
-time = 0.0
-targetTime = 0.0
 fdsTStep = 0
 oofemTStep = 0
 
@@ -41,11 +34,6 @@ class ClassCentroid:
 
 class TempField:
     def __init__(self, numNodes=0, numCells=0):
-        global oofemImported
-        global liboofem
-        if not oofemImported:
-            oofemImported = True
-            import liboofem as liboofem
 
         self.uniform = None  # 1=uniform, 0=unstructured, -1=field of points without cells
         self.TField = None
@@ -212,15 +200,15 @@ class fds_runall:
 # ####  #####     ####     #################################################################################
 # ##########################################################################################################
 class fds_api(mupif.Application.Application):
-    def __init__(self, filename=""):
-        mupif.Application.Application.__init__(self, filename)
+    def __init__(self, file=""):
+        mupif.Application.Application.__init__(self, file)
         self.nMeshes = 0
         self.libfds = None
 
         # ID of the mesh, used for the boundary condition.
         self.meshBCID = 1
-        self.FDSTempFields = []
-        self.FDSASTField = None
+        self.fds_temperature_fields = []
+        self.fds_ast_field = None
         self.nVTU = 0
         self.nVTU_last = 0
         self.VTUoutPartM = False
@@ -237,6 +225,9 @@ class fds_api(mupif.Application.Application):
         self.errorCheckValues = []
         self.Meshes = []
         self.ASTMesh = None
+        self.meshNNodes = None
+
+        self.fds_step_internal = 0
 
     def initialize(self):
         if self.file != "":
@@ -252,7 +243,6 @@ class fds_api(mupif.Application.Application):
                 self.libfds = cdll.LoadLibrary(lib_full_path)
                 print("FDS reading input file '%s'" % self.file)
                 self.libfds.initialize.argtypes = [c_char_p]
-                # c_filename=c_char_p(b filename)
                 c_filename = bytes(self.file, encoding='utf-8')
                 self.libfds.initialize(c_filename)
                 self.nMeshes = self.libfds.give_nmeshes()
@@ -260,19 +250,29 @@ class fds_api(mupif.Application.Application):
             else:
                 print("FDS shared library was not found.")
 
+    def getCriticalTimeStep(self):
+        """
+        This function can return any value, because its timestep is so small, that it is supposed
+        to make many real timesteps to reach the outer timestep length.
+
+        :return: Returns maximum formal timestep length.
+        :rtype: mupif.Physics.PhysicalQuantities.PhysicalQuantity
+        """
+        return mupif.Physics.PhysicalQuantities.PhysicalQuantity(3600.0, 's')
+
     def errorCheckLoad(self, filename="FDSErrorCheck.txt"):
         if os.path.exists(filename):
             print("loading FDSErrorCheck...")
             text_file = open(filename, "r")
-            textLine = text_file.readline()
-            while len(textLine) > 1:
-                splitted = textLine.split()
+            text_line = text_file.readline()
+            while len(text_line) > 1:
+                splitted = text_line.split()
                 if len(splitted) == 4:
                     self.errorCheckMeshes.append(int(splitted[0]))
                     self.errorCheckSteps.append(int(splitted[1]))
                     self.errorCheckNodes.append(int(splitted[2]))
                     self.errorCheckValues.append(float(splitted[3]))
-                textLine = text_file.readline()
+                text_line = text_file.readline()
             text_file.close()
             if len(self.errorCheckValues) > 0:
                 self.errorCheck = 1
@@ -281,12 +281,12 @@ class fds_api(mupif.Application.Application):
         else:
             print("FDSErrorCheck file not found")
 
-    def errorCheckRun(self, stepNumber):
+    def errorCheckRun(self, step_number):
         if self.errorCheck:
             for i in range(0, len(self.errorCheckValues)):
-                if stepNumber == self.errorCheckSteps[i]:
-                    foundValue = float(self.FDSTempFields[self.errorCheckMeshes[i] - 1].value[self.errorCheckNodes[i]])
-                    print(" CheckVal %lf .EQ. %lf" % (foundValue, self.errorCheckValues[i]))
+                if step_number == self.errorCheckSteps[i]:
+                    foundValue = float(self.fds_temperature_fields[self.errorCheckMeshes[i] - 1].value[self.errorCheckNodes[i]])
+                    print(" FDS check step %d CheckVal %lf .EQ. %lf" % (self.fds_step_internal, foundValue, self.errorCheckValues[i]))
                     if self.errorCheckValues[i] == 0.0:
                         print("Zero cannot be checked.")
                     else:
@@ -330,14 +330,14 @@ class fds_api(mupif.Application.Application):
         Meshsize[1] = my.value
         Meshsize[2] = mz.value
 
-    def loadMeshes(self, boundaryTempField=None):
+    def loadMeshes(self, boundary_temp_field=None):
         nnodes = [0, 0, 0]
         dimensions = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
         oneCellSizes = []
         meshCellCounts = []
         meshCellCountsBefore = []
         meshCorners = []
-        self.meshNNodes = [[0 for x in range(3)] for y in range(self.nMeshes)]  # checkit
+        self.meshNNodes = [[0 for x in range(3)] for y in range(self.nMeshes)]
         for i in range(0, self.nMeshes):
             newmesh = mupif.Mesh.UnstructuredMesh()
             self.getMeshGridProperties(i + 1, dimensions, nnodes)
@@ -383,10 +383,10 @@ class fds_api(mupif.Application.Application):
             oneCellSizes.append(velikost)
             self.Meshes.append(newmesh)
             newTempfield = mupif.Field.Field(newmesh, mupif.FieldID.FID_Temperature, mupif.ValueType.ValueType.Scalar, 'C', 0.0)
-            self.FDSTempFields.append(newTempfield)
+            self.fds_temperature_fields.append(newTempfield)
 
-        if boundaryTempField != None:
-            boundaryTempField.createFromTempField(self.meshBCID, self.FDSTempFields[self.meshBCID - 1])
+        if boundary_temp_field:
+            boundary_temp_field.createFromTempField(self.meshBCID, self.fds_temperature_fields[self.meshBCID - 1])
 
     def loadTempsOnMeshes(self):
         tempVal = c_double(0.0)
@@ -400,15 +400,15 @@ class fds_api(mupif.Application.Application):
                         pmj = c_int(mj + 1)
                         pmk = c_int(mk + 1)
                         self.libfds.give_teplotu(byref(tempVal), byref(pmi), byref(pmj), byref(pmk), byref(paramMeshId))
-                        self.FDSTempFields[i].value[j] = tempVal.value
+                        self.fds_temperature_fields[i].value[j] = tempVal.value
                         j = j + 1
-            self.FDSTempFields[i].time = self.fds_time.value
+            self.fds_temperature_fields[i].time = self.fds_time.value
 
         if self.VTUoutPartM:
             if self.nVTU_last == self.nVTU:
                 self.nVTU = self.nVTU + 1
             for im in range(0, self.nMeshes):
-                self.FDSTempFields[im].toVTK3('particularTempField%d_%d.vtu' % (im + 1, self.nVTU))
+                self.fds_temperature_fields[im].toVTK3('particularTempField%d_%d.vtu' % (im + 1, self.nVTU))
                 pvdFile = open("particularTempField%d.pvd" % (im + 1), "w")
                 pvdFile.write("<?xml version=\"1.0\"?>\n<VTKFile type=\"Collection\" version=\"0.1\">\n<Collection>\n")
                 for i in range(0, self.nVTU):
@@ -422,41 +422,41 @@ class fds_api(mupif.Application.Application):
         self.times.append(self.fds_time.value)
         self.loadTempsOnMeshes()
 
-    def loadASTMesh(self, boundaryTempField=None):
+    def loadASTMesh(self, boundary_temp_field=None):
         filename = "./ASTPointsCoords.txt"
         if os.path.exists(filename):
             nodeid = 0
             print("loading AST mesh points...")
             newmesh = mupif.Mesh.UnstructuredMesh()
             text_file = open(filename, "r")
-            textLine = text_file.readline()
-            while len(textLine) > 1:
-                splitted = textLine.split()
+            text_line = text_file.readline()
+            while len(text_line) > 1:
+                splitted = text_line.split()
                 if len(splitted) == 3:
                     nodeid = nodeid + 1
                     newmesh.vertexList.append(
                         mupif.Vertex.Vertex(nodeid, nodeid, (float(splitted[0]), float(splitted[1]), float(splitted[2]))))
-                textLine = text_file.readline()
+                text_line = text_file.readline()
             text_file.close()
             self.ASTMesh = newmesh
             print("%d ASTPoints" % nodeid)
-            self.FDSASTField = mupif.Field.Field(self.ASTMesh, mupif.FieldID.FID_Temperature, mupif.ValueType.ValueType.Scalar, 'C', 0.0)
+            self.fds_ast_field = mupif.Field.Field(self.ASTMesh, mupif.FieldID.FID_Temperature, mupif.ValueType.ValueType.Scalar, 'C', 0.0)
 
-            if boundaryTempField != None:
-                boundaryTempField.createFromASTField(self.FDSASTField)
+            if boundary_temp_field:
+                boundary_temp_field.createFromASTField(self.fds_ast_field)
         else:
             print("ASTPointsCoords.txt file not found")
 
     def loadASTemps(self):
         for i in range(0, len(self.ASTMesh.vertexList)):
-            self.FDSASTField.value[i] = self.giveASTG(i + 1)
-        self.FDSASTField.time = self.fds_time.value
+            self.fds_ast_field.value[i] = self.giveASTG(i + 1)
+        self.fds_ast_field.time = self.fds_time.value
 
         if self.VTUoutAST:
             if self.nVTU_last == self.nVTU:
                 self.nVTU = self.nVTU + 1
 
-            self.FDSASTField.toVTK3('AST_field_%d.vtu' % self.nVTU)
+            self.fds_ast_field.toVTK3('AST_field_%d.vtu' % self.nVTU)
             pvdFile = open("AST_field.pvd", "w")
             pvdFile.write("<?xml version=\"1.0\"?>\n<VTKFile type=\"Collection\" version=\"0.1\">\n<Collection>\n")
             for i in range(0, self.nVTU):
@@ -465,17 +465,39 @@ class fds_api(mupif.Application.Application):
             pvdFile.write("</Collection>\n</VTKFile>")
             pvdFile.close()
 
-    def solveStep(self):
-        self.nVTU_last = self.nVTU
-        self.step = self.step + 1
+    def solve_sub_step(self):
+        self.fds_step_internal += 1
         self.libfds.solve_step()
         self.libfds.get_t(byref(self.fds_time))
         self.libfds.get_dt(byref(self.fds_dtime))
 
-    def getTime(self):
-        return self.fds_time.value
+        if self.errorCheck:
+            self.exportMeshes()
+            self.errorCheckRun(self.fds_step_internal)
 
-    def complete(self):
+    def solveStep(self, tstep, stageID=0, runInBackground=False):
+        """
+        :param mupif.TimeStep.TimeStep tstep:
+        :param int stageID:
+        :param bool runInBackground:
+        """
+        self.nVTU_last = self.nVTU
+        self.step += 1
+        print('-> FDS step %d' % self.step)
+
+        while self.getTime() < tstep.getTime():
+            self.solve_sub_step()
+
+        # add exports to VTU
+
+    def getTime(self):
+        """
+        :return:
+        :rtype: mupif.Physics.PhysicalQuantities.PhysicalQuantity
+        """
+        return mupif.Physics.PhysicalQuantities.PhysicalQuantity(self.fds_time.value, 's')
+
+    def terminate(self):
         self.libfds.complete()
 
     def dumpTempFields(self, filename="FDSTempF"):
@@ -483,7 +505,7 @@ class fds_api(mupif.Application.Application):
             self.nVTU = self.nVTU + 1
         for im in range(0, self.nMeshes):
             if im == self.meshBCID - 1:
-                self.FDSTempFields[im].dumpToLocalFile("%s%d_s%d.pf" % (filename, im, self.nVTU), 0)
+                self.fds_temperature_fields[im].dumpToLocalFile("%s%d_s%d.pf" % (filename, im, self.nVTU), 0)
                 text_file = open("%s%d.tpf" % (filename, im), "w")
                 text_file.write("%d\n" % self.nVTU)
                 for i in range(0, self.nVTU):
@@ -491,14 +513,14 @@ class fds_api(mupif.Application.Application):
                 text_file.close()
 
     def loadTempField(self, filename):
-        loadedField = mupif.Field.Field.loadFromLocalFile(filename)
-        if self.meshBCID > len(self.FDSTempFields) - 1:
-            for i in range(0, self.meshBCID - len(self.FDSTempFields) - 1):
-                self.FDSTempFields.append(None)
-            self.FDSTempFields.append(loadedField)
+        loaded_field = mupif.Field.Field.loadFromLocalFile(filename)
+        if self.meshBCID > len(self.fds_temperature_fields) - 1:
+            for i in range(0, self.meshBCID - len(self.fds_temperature_fields) - 1):
+                self.fds_temperature_fields.append(None)
+            self.fds_temperature_fields.append(loaded_field)
         else:
-            self.FDSTempFields[self.meshBCID - 1] = loadedField
-        return loadedField
+            self.fds_temperature_fields[self.meshBCID - 1] = loaded_field
+        return loaded_field
 
     def loadDumpedInfo(self, filename, filenames):
         text_file = open(filename, "r")
@@ -513,32 +535,32 @@ class fds_api(mupif.Application.Application):
         if self.nVTU_last == self.nVTU:
             self.nVTU = self.nVTU + 1
         text_file = open("%s_s%d.pf" % (filename, self.nVTU), "w")
-        text_file.write("%f\n%d\n" % (self.FDSASTField.time, len(self.FDSASTField.value)))
-        for i in range(0, len(self.FDSASTField.value)):
-            text_file.write("%f\n" % self.FDSASTField.value[i])
+        text_file.write("%f\n%d\n" % (self.fds_ast_field.time, len(self.fds_ast_field.value)))
+        for i in range(0, len(self.fds_ast_field.value)):
+            text_file.write("%f\n" % self.fds_ast_field.value[i])
         text_file.close()
-        text_file = open("%s.tpf" % (filename), "w")
+        text_file = open("%s.tpf" % filename, "w")
         text_file.write("%d\n" % self.nVTU)
         for i in range(0, self.nVTU):
             text_file.write("%s_s%d.pf\n" % (filename, i + 1))
         text_file.close()
 
     def loadASTField(self, filename):
-        if self.ASTMesh == None:
-            filenameM = "./ASTPointsCoords.txt"
-            if os.path.exists(filenameM):
+        if self.ASTMesh is None:
+            filename_m = "./ASTPointsCoords.txt"
+            if os.path.exists(filename_m):
                 nodeid = 0
                 print("loading AST mesh points...")
                 newmesh = mupif.Mesh.UnstructuredMesh()
-                text_file = open(filenameM, "r")
-                textLine = text_file.readline()
-                while len(textLine) > 1:
-                    splitted = textLine.split()
+                text_file = open(filename_m, "r")
+                text_line = text_file.readline()
+                while len(text_line) > 1:
+                    splitted = text_line.split()
                     if len(splitted) == 3:
                         nodeid = nodeid + 1
                         newmesh.vertexList.append(
                             mupif.Vertex.Vertex(nodeid, nodeid, (float(splitted[0]), float(splitted[1]), float(splitted[2]))))
-                    textLine = text_file.readline()
+                    text_line = text_file.readline()
                 text_file.close()
                 self.ASTMesh = newmesh
                 print("%d ASTPoints" % nodeid)
@@ -554,15 +576,15 @@ class fds_api(mupif.Application.Application):
         for i in range(0, numberOfNodes):
             tempValues.append(float(text_file.readline()))
 
-        self.FDSASTField = mupif.Field.Field(self.ASTMesh, mupif.FieldID.FID_Temperature, mupif.ValueType.ValueType.Scalar, 'C', stepTime,
-                                       tempValues)
-        return self.FDSASTField
+        self.fds_ast_field = mupif.Field.Field(self.ASTMesh, mupif.FieldID.FID_Temperature, mupif.ValueType.ValueType.Scalar, 'C', stepTime,
+                                               tempValues)
+        return self.fds_ast_field
 
     def giveTempFieldValues(self):
-        return self.FDSTempFields[self.meshBCID - 1].value
+        return self.fds_temperature_fields[self.meshBCID - 1].value
 
     def giveASTFieldValues(self):
-        return self.FDSASTField.value
+        return self.fds_ast_field.value
 
     def giveASTG(self, ind):
         loc_ind = c_int(ind)
@@ -582,21 +604,16 @@ class fds_api(mupif.Application.Application):
 # #####    ####    ###  #####     ##  ####  ################################################################
 # ##########################################################################################################
 class oofem_api(mupif.Application.Application):
-    def __init__(self, inputfilename):
-        mupif.Application.Application.__init__(self, inputfilename)
-        global oofemImported
-        global liboofem
-        if not oofemImported:
-            oofemImported = True
-            import liboofem as liboofem
+    def __init__(self, file=""):
+        mupif.Application.Application.__init__(self, file)
 
         self.TFBC = TempField()
         self.ASTField = TempField()
 
-        self.dt = 0.0
-        self.lastT = 0.0
+        self.lastT = mupif.Physics.PhysicalQuantities.PhysicalQuantity(0.0, 's')
         self.transp_model = None
         self.field_man = None
+        self.step = 0
 
     def initialize(self):
         if self.file != "":
@@ -609,14 +626,32 @@ class oofem_api(mupif.Application.Application):
             self.transp_model.initMetaStepAttributes(active_m_step)
             self.field_man = self.transp_model.giveContext().giveFieldManager()
 
+    def getCriticalTimeStep(self):
+        """
+        This function is not linked with used material model.
+        The timestep length should be defined in the steering code.
+
+        :return: Returns maximum formal timestep length.
+        :rtype: mupif.Physics.PhysicalQuantities.PhysicalQuantity
+        """
+        return mupif.Physics.PhysicalQuantities.PhysicalQuantity(60.0, 's')
+
     def solveStep(self, tstep, stageID=0, runInBackground=False):
-        # tstep is now a float -> TODO
-        self.lastT = tstep
+        """
+        :param mupif.TimeStep.TimeStep tstep:
+        :param int stageID:
+        :param bool runInBackground:
+        """
+        self.step += 1
+        print('-> OOFEM step %d' % self.step)
+
+        time_units = mupif.Physics.PhysicalQuantities.PhysicalUnit('s', 1., [0, 0, 1, 0, 0, 0, 0, 0, 0])
+        self.lastT = tstep.getTime()
         self.transp_model.preInitializeNextStep()
         self.transp_model.giveNextStep()
         previous_target_time = self.transp_model.givePreviousStep().giveTargetTime()
         current_step = self.transp_model.giveCurrentStep()
-        deltaToofem = tstep - previous_target_time
+        deltaToofem = tstep.getTime().inUnitsOf(time_units).getValue() - previous_target_time
         alpha = (current_step.giveIntrinsicTime() - previous_target_time) / (
                 current_step.giveTargetTime() - previous_target_time)
         current_step.setTargetTime(previous_target_time + deltaToofem)
@@ -628,7 +663,7 @@ class oofem_api(mupif.Application.Application):
         self.transp_model.updateYourself(current_step)
         self.transp_model.terminate(current_step)
 
-    def complete(self):
+    def terminate(self):
         timeStep = self.transp_model.giveCurrentStep()
 
     def regTempField(self):
@@ -653,3 +688,30 @@ class oofem_api(mupif.Application.Application):
             o_field[i] = float(temp)
         self.TFBC.TField.setValues(o_field)
         self.field_man.registerField(self.TFBC.TField, liboofem.FieldType.FT_TemperatureAmbient)
+
+
+class FdsOofemSimulation(mupif.Workflow.Workflow):
+
+    def __init__(self):
+        mupif.Workflow.Workflow.__init__(self)
+        self.app_fds = fds_api()
+        self.app_oofem = oofem_api()
+        self.max_dt = mupif.Physics.PhysicalQuantities.PhysicalQuantity(60.0, 's')
+        self.target_time = mupif.Physics.PhysicalQuantities.PhysicalQuantity(600.0, 's')
+
+    def initialize(self):
+        self.app_fds.initialize()
+        self.app_oofem.initialize()
+
+    def getCriticalTimeStep(self):
+        return min(self.app_fds.getCriticalTimeStep(), self.app_oofem.getCriticalTimeStep(), self.max_dt)
+
+    def solveStep(self, tstep, stageID=0, runInBackground=False):
+        self.app_fds.solveStep(tstep, stageID, runInBackground)
+        self.app_oofem.solveStep(tstep, stageID, runInBackground)
+
+    def setMaxDtInSeconds(self, val):
+        self.max_dt = mupif.Physics.PhysicalQuantities.PhysicalQuantity(val, 's')
+
+    def setTargetTimeInSeconds(self, val):
+        self.target_time = mupif.Physics.PhysicalQuantities.PhysicalQuantity(val, 's')
