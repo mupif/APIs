@@ -200,8 +200,47 @@ class fds_runall:
 # ####  #####     ####     #################################################################################
 # ##########################################################################################################
 class fds_api(mupif.Application.Application):
-    def __init__(self, file=""):
-        mupif.Application.Application.__init__(self, file)
+    def __init__(self, metaData={}):
+
+        MD = {
+            'Name': 'Fire Dynamics Simulator',
+            'ID': 'cfd-1',
+            'Description': 'Computational Fluid Dynamics model',
+            'Solver': {
+                'Software': 'FDS',
+                'Language': 'Fortran',
+                'License': 'LGPL',
+                'Creator': 'NIST',
+                'Version_date': '6.5.2',
+                'Type': 'Finite volumes',
+                'Documentation': '',
+                'Estim_time_step_s': 1.,
+                'Estim_comp_time_s': 1.,
+                'Estim_execution_cost_EUR': 0.01,
+                'Estim_personnel_cost_EUR': 0.01,
+                'Required_expertise': 'User',
+                'Accuracy': 'Medium',
+                'Sensitivity': 'High',
+                'Complexity': 'High',
+                'Robustness': 'Low'
+            },
+            'Physics': {
+                'Type': 'Continuum',
+                'Entity': 'Finite volume',
+                'Equation': ['N/A'],
+                'Equation_quantities': ['N/A'],
+                'Relation_description': ['N/A'],
+                'Relation_formulation': ['N/A'],
+                'Representation': 'Finite volumes'
+            },
+            'Inputs': [],
+            'Outputs': [{'Type': 'mupif.Field', 'Type_ID': 'mupif.FieldID.FID_Temperature', 'Name': 'AST field',
+                         'Description': 'Adiabatic surface temperature field', 'Units': 'C'}]
+        }
+
+        super(fds_api, self).__init__(metaData=MD)
+        self.updateMetadata(metaData)
+
         self.nMeshes = 0
         self.libfds = None
 
@@ -229,7 +268,10 @@ class fds_api(mupif.Application.Application):
 
         self.fds_step_internal = 0
 
-    def initialize(self):
+    def initialize(self, file='', workdir='', metaData={}, validateMetaData=True, **kwargs):
+        super(fds_api, self).initialize(
+            file=file, workdir=workdir, metaData=metaData, validateMetaData=validateMetaData, **kwargs)
+
         if self.file != "":
             lib_full_path = "undefined"
             lib_filename = "fds.so"
@@ -382,7 +424,7 @@ class fds_api(mupif.Application.Application):
                 velikost = velikost * (dimensions[c + 3] - dimensions[c]) / (nnodes[c] - 1)
             oneCellSizes.append(velikost)
             self.Meshes.append(newmesh)
-            newTempfield = mupif.Field.Field(newmesh, mupif.FieldID.FID_Temperature, mupif.ValueType.ValueType.Scalar, 'C', 0.0)
+            newTempfield = mupif.Field.Field(newmesh, mupif.FieldID.FID_Temperature, mupif.ValueType.Scalar, 'C', 0.0)
             self.fds_temperature_fields.append(newTempfield)
 
         if boundary_temp_field:
@@ -440,7 +482,7 @@ class fds_api(mupif.Application.Application):
             text_file.close()
             self.ASTMesh = newmesh
             print("%d ASTPoints" % nodeid)
-            self.fds_ast_field = mupif.Field.Field(self.ASTMesh, mupif.FieldID.FID_Temperature, mupif.ValueType.ValueType.Scalar, 'C', 0.0)
+            self.fds_ast_field = mupif.Field.Field(self.ASTMesh, mupif.FieldID.FID_Temperature, mupif.ValueType.Scalar, 'C', 0.0)
 
             if boundary_temp_field:
                 boundary_temp_field.createFromASTField(self.fds_ast_field)
@@ -576,7 +618,7 @@ class fds_api(mupif.Application.Application):
         for i in range(0, numberOfNodes):
             tempValues.append(float(text_file.readline()))
 
-        self.fds_ast_field = mupif.Field.Field(self.ASTMesh, mupif.FieldID.FID_Temperature, mupif.ValueType.ValueType.Scalar, 'C', stepTime,
+        self.fds_ast_field = mupif.Field.Field(self.ASTMesh, mupif.FieldID.FID_Temperature, mupif.ValueType.Scalar, 'C', stepTime,
                                                tempValues)
         return self.fds_ast_field
 
@@ -604,8 +646,45 @@ class fds_api(mupif.Application.Application):
 # #####    ####    ###  #####     ##  ####  ################################################################
 # ##########################################################################################################
 class oofem_api(mupif.Application.Application):
-    def __init__(self, file=""):
-        mupif.Application.Application.__init__(self, file)
+    def __init__(self, metaData={}):
+        MD = {
+            'Name': 'OOFEM',
+            'ID': 'tm-1',
+            'Description': 'Thermo-mechanical model',
+            'Solver': {
+                'Software': 'OOFEM',
+                'Language': 'C++',
+                'License': 'LGPL',
+                'Creator': 'Borek Patzak',
+                'Version_date': '',
+                'Type': 'Finite Elements',
+                'Documentation': '',
+                'Estim_time_step_s': 1.,
+                'Estim_comp_time_s': 1.,
+                'Estim_execution_cost_EUR': 0.01,
+                'Estim_personnel_cost_EUR': 0.01,
+                'Required_expertise': 'User',
+                'Accuracy': 'High',
+                'Sensitivity': 'Medium',
+                'Complexity': 'Medium',
+                'Robustness': 'Medium'
+            },
+            'Physics': {
+                'Type': 'Continuum',
+                'Entity': 'Finite volume',
+                'Equation': ['N/A'],
+                'Equation_quantities': ['N/A'],
+                'Relation_description': ['N/A'],
+                'Relation_formulation': ['N/A'],
+                'Representation': 'Finite elements'
+            },
+            'Inputs': [{'Type': 'mupif.Field', 'Type_ID': 'mupif.FieldID.FID_Temperature', 'Name': 'AST field',
+                         'Description': 'Adiabatic surface temperature field', 'Units': 'C', 'Required': True}],
+            'Outputs': []
+        }
+
+        super(oofem_api, self).__init__(metaData=MD)
+        self.updateMetadata(metaData)
 
         self.TFBC = TempField()
         self.ASTField = TempField()
@@ -615,7 +694,9 @@ class oofem_api(mupif.Application.Application):
         self.field_man = None
         self.step = 0
 
-    def initialize(self):
+    def initialize(self, file='', workdir='', metaData={}, validateMetaData=True, **kwargs):
+        super(oofem_api, self).initialize(
+            file=file, workdir=workdir, metaData=metaData, validateMetaData=validateMetaData, **kwargs)
         if self.file != "":
             print("OOFEM reading input file '%s'" % self.file)
             dr = liboofem.OOFEMTXTDataReader(self.file)

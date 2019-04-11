@@ -1,10 +1,18 @@
 import sys
 import mupif
 sys.path.append('../..')
-import apis_and_linking as fol
+import apis_and_linking
 
-app1 = fol.fds_api("input.fds")
-app1.initialize()
+md = {
+    'Execution': {
+        'ID': '1',
+        'Use_case_ID': '1',
+        'Task_ID': '1'
+    }
+}
+
+app1 = apis_and_linking.fds_api()
+app1.initialize(metaData=md, file="input.fds")
 
 app1.meshBCID = 1
 
